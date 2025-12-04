@@ -117,7 +117,7 @@ st.header("Portfolio Inputs")
 # The only input field is now the Tickers
 ticker_input = st.text_input(
     "Ticker Symbols (e.g., AAPL, MSFT, GOOG)", 
-    "BABA, CRWD, GEV, NET, NU, BIDU, CPNG, FUTU, DOCN, VST, TSM, RBRK"
+    "AAPL, MSFT, GOOG"
 )
 
 if st.button("Calculate Risk"):
