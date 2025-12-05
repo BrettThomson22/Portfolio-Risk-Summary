@@ -1,5 +1,7 @@
-numpy
-pandas
-scipy
 streamlit
+pandas
+numpy
 yfinance
+scikit-learn
+altair
+pyarrow
