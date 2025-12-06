@@ -196,8 +196,8 @@ with st.sidebar:
     seed = st.number_input("Random Seed (0 = random)", min_value=0, value=0, step=1)
 
 st.header("Inputs")
-ticker_input = st.text_input("Tickers (comma separated). Use .JO for JSE tickers.", value="AAPL, MSFT")
-weights_input = st.text_input("Optional Weights (comma separated, sum to 1). Leave empty = equal weight.", value="0.50,0.50")
+ticker_input = st.text_input("Tickers (comma separated). Use .JO for JSE tickers.", value="SSW.JO, FSR.JO, CYBR, CRWD")
+weights_input = st.text_input("Optional Weights (comma separated, sum to 1). Leave empty = equal weight.", value="0.20,0.20,0.50,0.10")
 
 if st.button("Calculate Risk"):
     tickers = [t.strip().upper() for t in ticker_input.split(",") if t.strip()]
@@ -287,32 +287,98 @@ if st.button("Calculate Risk"):
             return str(x)
 
     st.header("Portfolio Summary (Annualized)")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Model Inputs")
+    
+    # New Metric Display using Streamlit's experimental columns for cleaner layout
+    st.subheader("Parametric Risk Metrics")
+    
+    # Top Row: Return and Volatility
+    col_ret, col_vol, col_va = st.columns(3)
+    
+    with col_ret:
+        st.metric(
+            label="Expected Annual Return", 
+            value=pct(metrics['mup_a']),
+            delta_color="normal",
+            help="Mean expected return over one year based on historical data."
+        )
+    with col_vol:
+        st.metric(
+            label="Annual Volatility (Risk)", 
+            value=pct(metrics['sigma_a']),
+            delta_color="off",
+            help="Standard deviation of returns over one year. Higher is riskier."
+        )
+    with col_va:
+        st.metric(
+            label="95% Value-at-Risk (VaR)", 
+            value=pct(metrics['VaR95_annual']),
+            delta_color="inverse",
+            help="The maximum expected loss (in percent) over one year with a 95% confidence level."
+        )
+
+    # Bottom Row: Probability Metrics
+    st.subheader("Probability & Distribution")
+    col_pl, col_pt, col_dist = st.columns(3)
+
+    with col_pl:
+        # P(Loss)
+        loss_delta = f"{metrics['prob_loss_a'] * 100:.2f}%"
+        st.metric(
+            label="Probability of Loss (P(R<0))", 
+            value=pct(metrics['prob_loss_a']),
+            delta=f"1-yr Risk of {loss_delta}",
+            delta_color="inverse",
+            help="Probability that the portfolio's return will be negative over the next year."
+        )
+    with col_pt:
+        # P(Target)
+        target_delta = f"{metrics['prob_target_a'] * 100:.2f}%"
+        st.metric(
+            label="P(Return ≥ 20%)", 
+            value=pct(metrics['prob_target_a']),
+            delta=f"1-yr Success of {target_delta}",
+            delta_color="normal",
+            help="Probability that the portfolio will achieve an annualized return of 20% or more."
+        )
+    with col_dist:
+        # Distribution Model
+        st.metric(
+            label="Model Distribution (ν)", 
+            value=metrics['df'],
+            help="The statistical distribution model used for parametric risk calculations. ν is the degrees of freedom for the t-distribution."
+        )
+
+
+    # Original Inputs Summary (moved to a smaller container)
+    st.markdown("---")
+    st.subheader("Analysis Parameters")
+    param_col1, param_col2, param_col3 = st.columns(3)
+    with param_col1:
         st.metric("Tickers Used", ", ".join(tickers))
-        st.metric("Weights", ", ".join([f"{w:.3f}" for w in W]))
         st.metric("Historical Weeks", returns_weekly.shape[0])
-        st.metric("Degrees of Freedom (ν)", metrics['df'])
-    with col2:
-        st.subheader("Parametric Risk Metrics")
-        st.metric("Expected Annual Return", pct(metrics['mup_a']))
-        st.metric("Annual Volatility", pct(metrics['sigma_a']))
-        st.metric("P(Loss in 1yr)", pct(metrics['prob_loss_a']))
-        st.metric("P(Return ≥ 20% in 1yr)", pct(metrics['prob_target_a']))
-        st.metric("95% VaR (1yr)", pct(metrics['VaR95_annual']))
+    with param_col2:
+        st.metric("Weights", ", ".join([f"{w:.3f}" for w in W]))
+    with param_col3:
+        st.metric("Volatility Stress", f"x{vol_multiplier:.2f}")
+
 
     if do_simulation and sim_results:
         st.header("Monte Carlo (Empirical) Results — 1 Year")
         st.write(f"Simulations run: {len(sim_results.get('annual_rets', []))}")
-        mc_col1, mc_col2 = st.columns(2)
+        
+        # Empirical Metrics Row
+        mc_col1, mc_col2, mc_col3 = st.columns(3)
         if 'sim_prob_loss' in sim_results:
             with mc_col1:
-                st.metric("Empirical P(Loss in 1yr)", pct(sim_results['sim_prob_loss']))
-                st.metric("Empirical P(Return ≥ 20% in 1yr)", pct(sim_results['sim_prob_target']))
+                st.metric("Empirical P(Loss)", pct(sim_results['sim_prob_loss']))
             with mc_col2:
-                st.metric("Median Max Drawdown (1yr)", pct(sim_results['median_dd']))
-                st.metric("95% CI Max Drawdown (1yr)", f"[{pct(sim_results['dd_ci_low'])}, {pct(sim_results['dd_ci_high'])}]")
+                st.metric("Empirical P(Target)", pct(sim_results['sim_prob_target']))
+            with mc_col3:
+                st.metric("Median Max Drawdown", pct(sim_results['median_dd']))
+
+            st.subheader("Simulated Drawdown Confidence Interval")
+            st.code(f"95% CI Max Drawdown: [{pct(sim_results['dd_ci_low'])}, {pct(sim_results['dd_ci_high'])}]")
+            
             st.subheader("Max Drawdown Distribution (Simulated)")
             dd_ser = pd.Series(sim_results['max_drawdowns'])
             st.bar_chart(dd_ser.value_counts(bins=40).sort_index())
