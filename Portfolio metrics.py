@@ -13,47 +13,63 @@ from sklearn.covariance import LedoitWolf
 def fetch_prices_resilient(tickers, start, end):
     """
     Fetch weekly prices for tickers, fall back to daily resample if needed.
+    Corrects JSE (.JO) tickers by dividing prices by 100 (cents to Rands).
     Returns prices DataFrame of weekly 'Close' prices.
     """
     tickers = list(tickers)
-    # Try weekly fetch
+    
+    def process_prices(data_raw, tickers_list, interval):
+        prices = pd.DataFrame()
+        for tkr in tickers_list:
+            series = None
+            
+            # Extract 'Close' price series
+            if len(tickers_list) == 1 and 'Close' in data_raw.columns:
+                series = data_raw['Close'].dropna()
+            elif tkr in data_raw.columns and 'Close' in data_raw[tkr].columns:
+                series = data_raw[tkr]['Close'].dropna()
+
+            if series is not None:
+                # --- JSE Correction Logic ---
+                if tkr.upper().endswith(".JO"):
+                    # Prices for JSE are often given in cents, divide by 100 to get Rands
+                    series = series / 100
+                # --- End Correction Logic ---
+                
+                if interval == '1d':
+                    # Resample daily to weekly (Friday close)
+                    weekly = series.resample('W-FRI').last().dropna()
+                    prices[tkr] = weekly
+                else:
+                    prices[tkr] = series
+        return prices
+
+    # 1. Try weekly fetch (1wk)
+    data_w = None
     try:
         data_w = yf.download(tickers, start=start, end=end, interval='1wk',
                              group_by='ticker', auto_adjust=True, threads=True)
     except Exception:
-        data_w = None
+        pass
 
     prices = pd.DataFrame()
     if isinstance(data_w, pd.DataFrame) and not data_w.empty:
-        for tkr in tickers:
-            try:
-                prices[tkr] = data_w[tkr]['Close']
-            except Exception:
-                if len(tickers) == 1 and 'Close' in data_w.columns:
-                    prices[tkr] = data_w['Close']
+        prices = process_prices(data_w, tickers, '1wk')
 
-    # If insufficient rows, try daily + resample
+    # 2. If insufficient rows, try daily (1d) + resample
     min_weeks = int(((end - start).days / 7) * 0.6)
     if prices.shape[0] < min_weeks or prices.shape[1] < len(tickers):
+        data_d = None
         try:
             data_d = yf.download(tickers, start=start, end=end, interval='1d',
                                  group_by='ticker', auto_adjust=True, threads=True)
         except Exception:
-            data_d = None
+            pass
 
         if isinstance(data_d, pd.DataFrame) and not data_d.empty:
-            prices = pd.DataFrame()
-            for tkr in tickers:
-                series = None
-                try:
-                    series = data_d[tkr]['Close'].dropna()
-                except Exception:
-                    if len(tickers) == 1 and 'Close' in data_d.columns:
-                        series = data_d['Close'].dropna()
-                if series is not None:
-                    weekly = series.resample('W-FRI').last().dropna()
-                    prices[tkr] = weekly
+            prices = process_prices(data_d, tickers, '1d')
 
+    # Final cleanup: drop any remaining rows or columns with all NaNs
     prices = prices.dropna(axis=1, how='all').dropna(axis=0, how='any')
     return prices
 
@@ -159,13 +175,13 @@ def portfolio_metrics_and_simulation(returns_weekly_df, W, use_t=True, df=5, vol
 # ---------------------------
 
 st.set_page_config(layout="wide", page_title="Portfolio Risk — Robust Model")
-st.title("Portfolio Risk Calculator — Robust Model (No Proxy)")
+st.title("Portfolio Risk Calculator — Robust Model (JSE Price Corrected)")
 
 st.markdown("""
 Advanced calculator with:
 - Ledoit–Wolf covariance shrinkage
 - Multivariate t Monte Carlo simulation
-- Assumes all tickers have sufficient history (no proxy needed)
+- **FIXED:** Automatically divides prices by 100 for JSE tickers (`.JO`) to correct for cents-based reporting, providing accurate metrics.
 """)
 
 with st.sidebar:
@@ -180,7 +196,7 @@ with st.sidebar:
     seed = st.number_input("Random Seed (0 = random)", min_value=0, value=0, step=1)
 
 st.header("Inputs")
-ticker_input = st.text_input("Tickers (comma separated). Use .JO for JSE tickers.", value="CRWD, NET, RBRK, CYBR")
+ticker_input = st.text_input("Tickers (comma separated). Use .JO for JSE tickers.", value="SSW.JO, FSR.JO, CYBR, CRWD")
 weights_input = st.text_input("Optional Weights (comma separated, sum to 1). Leave empty = equal weight.", value="0.20,0.20,0.50,0.10")
 
 if st.button("Calculate Risk"):
@@ -223,9 +239,13 @@ if st.button("Calculate Risk"):
         W_aligned = np.zeros(len(tickers))
         for i, tkr in enumerate(tickers):
             try:
-                W_aligned[i] = W[original_tickers.index(tkr)]
-            except ValueError:
-                pass
+                # Find the original weight based on the original ticker list index
+                # This ensures the weights array stays aligned with the fetched prices
+                original_index = [i for i, t in enumerate(original_tickers) if t == tkr][0]
+                W_aligned[i] = W[original_index]
+            except IndexError:
+                # Fallback if alignment fails (shouldn't happen with .index() approach)
+                pass 
         W = W_aligned / np.sum(W_aligned)
 
     returns_weekly = prices.pct_change().dropna()
@@ -241,6 +261,7 @@ if st.button("Calculate Risk"):
             Sigma_w = lw.covariance_
             applied_shrink = True
         except Exception:
+            # Fallback to regularization if Ledoit-Wolf fails
             Sigma_w = Sigma_w + np.eye(Sigma_w.shape[0]) * 1e-6
             applied_shrink = True
 
