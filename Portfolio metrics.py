@@ -196,8 +196,8 @@ with st.sidebar:
     seed = st.number_input("Random Seed (0 = random)", min_value=0, value=0, step=1)
 
 st.header("Inputs")
-ticker_input = st.text_input("Tickers (comma separated). Use .JO for JSE tickers.", value="SSW.JO, FSR.JO, CYBR, CRWD")
-weights_input = st.text_input("Optional Weights (comma separated, sum to 1). Leave empty = equal weight.", value="0.20,0.20,0.50,0.10")
+ticker_input = st.text_input("Tickers (comma separated). Use .JO for JSE tickers.", value="AAPL, MSFT")
+weights_input = st.text_input("Optional Weights (comma separated, sum to 1). Leave empty = equal weight.", value="0.50,0.50")
 
 if st.button("Calculate Risk"):
     tickers = [t.strip().upper() for t in ticker_input.split(",") if t.strip()]
