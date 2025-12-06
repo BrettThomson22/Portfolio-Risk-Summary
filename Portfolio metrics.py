@@ -91,7 +91,7 @@ def is_cov_ok(Sigma):
 # Portfolio metrics & Simulation
 # ---------------------------
 
-def portfolio_metrics_and_simulation(returns_weekly_df, W, use_t=True, df=5, vol_multiplier=1.0,
+def portfolio_metrics_and_simulation(returns_weekly_df, W, risk_free_rate, use_t=True, df=5, vol_multiplier=1.0,
                                      do_sim=False, n_sims=2000, horizon_weeks=52, seed=None):
     mu_w = returns_weekly_df.mean().values
     Sigma_w = returns_weekly_df.cov().values
@@ -121,11 +121,16 @@ def portfolio_metrics_and_simulation(returns_weekly_df, W, use_t=True, df=5, vol
     var_annual = -(mup_a + sigma_a * q)
     var_annual = max(var_annual, 0.0)
 
+    # --- Sharpe Ratio Calculation ---
+    sharpe_ratio = (mup_a - risk_free_rate) / sigma_a if sigma_a > 0 else 0.0
+    # --- End Sharpe Ratio Calculation ---
+
     metrics = {
         "mup_a": mup_a, "sigma_a": sigma_a,
         "prob_loss_a": prob_loss_a,
         "prob_target_a": prob_target_a,
         "VaR95_annual": var_annual,
+        "sharpe_ratio": sharpe_ratio,
         "df": df if use_t else "N/A (Normal)"
     }
 
@@ -187,6 +192,9 @@ Advanced calculator with:
 with st.sidebar:
     st.header("Model Settings")
     period_years = st.number_input("Historical Lookback (years)", min_value=1, max_value=20, value=5)
+    # --- New Input for Risk-Free Rate ---
+    risk_free_rate = st.number_input("Annual Risk-Free Rate (%)", min_value=0.0, max_value=20.0, value=3.0, step=0.1) / 100.0
+    # --- End New Input ---
     use_t = st.checkbox("Use Student's t (MV-t) for MC & Parametrics", value=True)
     df_slider = st.slider("Degrees of freedom (ν) for T-dist", min_value=3, max_value=50, value=5)
     vol_multiplier = st.slider("Volatility Stress Multiplier (1.0 = normal)", min_value=0.8, max_value=3.0, value=1.0, step=0.05)
@@ -269,6 +277,7 @@ if st.button("Calculate Risk"):
         metrics, sim_results = portfolio_metrics_and_simulation(
             returns_weekly_df=returns_weekly,
             W=W,
+            risk_free_rate=risk_free_rate, # Passing the new parameter
             use_t=use_t,
             df=df_slider,
             vol_multiplier=vol_multiplier,
@@ -289,10 +298,10 @@ if st.button("Calculate Risk"):
     st.header("Portfolio Summary (Annualized)")
     
     # New Metric Display using Streamlit's experimental columns for cleaner layout
-    st.subheader("Parametric Risk Metrics")
+    st.subheader("Key Annual Performance Metrics")
     
-    # Top Row: Return and Volatility
-    col_ret, col_vol, col_va = st.columns(3)
+    # Top Row: Return, Volatility, and Sharpe Ratio
+    col_ret, col_vol, col_sharpe = st.columns(3)
     
     with col_ret:
         st.metric(
@@ -308,17 +317,18 @@ if st.button("Calculate Risk"):
             delta_color="off",
             help="Standard deviation of returns over one year. Higher is riskier."
         )
-    with col_va:
+    with col_sharpe: # New Sharpe Metric
         st.metric(
-            label="95% Value-at-Risk (VaR)", 
-            value=pct(metrics['VaR95_annual']),
-            delta_color="inverse",
-            help="The maximum expected loss (in percent) over one year with a 95% confidence level."
+            label="Sharpe Ratio", 
+            value=f"{metrics['sharpe_ratio']:.2f}",
+            delta_color="normal",
+            help=f"Return per unit of risk above the {risk_free_rate*100:.2f}% risk-free rate."
         )
 
-    # Bottom Row: Probability Metrics
-    st.subheader("Probability & Distribution")
-    col_pl, col_pt, col_dist = st.columns(3)
+
+    # Bottom Row: Probability & VaR
+    st.subheader("Downside Risk & Distribution")
+    col_pl, col_pt, col_va, col_dist = st.columns(4) # Added VaR back, now 4 columns
 
     with col_pl:
         # P(Loss)
@@ -339,6 +349,13 @@ if st.button("Calculate Risk"):
             delta=f"1-yr Success of {target_delta}",
             delta_color="normal",
             help="Probability that the portfolio will achieve an annualized return of 20% or more."
+        )
+    with col_va: # Moved VaR here
+        st.metric(
+            label="95% Value-at-Risk (VaR)", 
+            value=pct(metrics['VaR95_annual']),
+            delta_color="inverse",
+            help="The maximum expected loss (in percent) over one year with a 95% confidence level."
         )
     with col_dist:
         # Distribution Model
